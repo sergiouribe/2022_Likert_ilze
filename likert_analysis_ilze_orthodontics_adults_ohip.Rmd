@@ -1,0 +1,116 @@
+---
+title: "Likert analysis"
+output: html_notebook
+---
+
+Data cleaning, data wrangling and Likert analysis
+
+# Packages
+
+```{r}
+pacman::p_load(janitor, 
+               tidyverse, 
+               gtsummary, 
+               likert)
+```
+
+```{r}
+theme_set(theme_minimal())
+```
+
+# Dataset
+
+```{r}
+df <- read_csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vS8G_1WOroX3Bj1FSI-aV7qcMc3bb4osbttxy-gBc7xjzYXealbfdREtx5sppFe5qteGcSc4gN15FKj/pub?gid=14193945&single=true&output=csv")
+```
+
+Create a new column with the year and calculate the age
+
+## cleaning the date
+
+```{r}
+df %>% 
+  mutate(Year_actual = format(as.Date(Datum, format="%d/%m/%Y"),"%Y")) %>% 
+  relocate(Year_actual, .after = Datum) %>% 
+  ggplot(aes(x = Year_actual, 
+              y = `Birth year`)) + 
+  geom_jitter()
+```
+
+```{r}
+df <- df %>% 
+  mutate(Year_actual = format(as.Date(Datum, format="%d/%m/%Y"),"%Y")) %>% 
+  relocate(Year_actual, .after = Datum) %>% 
+  # calculate the age
+  mutate(`Birth year` = as.integer(`Birth year`)) %>% 
+   mutate(Year_actual = as.integer(Year_actual)) %>% 
+  mutate(Age = Year_actual - `Birth year`) %>% 
+  relocate(Age, .after = `Birth year`) %>% 
+  select(-c(Datum, Year_actual, `Birth year`))
+```
+
+# EDA
+
+```{r}
+head(df)
+
+```
+
+How many patients?
+
+```{r}
+df %>% 
+  janitor::tabyl(Gender) %>% 
+  adorn_pct_formatting() %>% 
+   adorn_totals("row") 
+```
+
+Age
+
+```{r}
+summary(df$Age)
+```
+
+```{r}
+df %>% 
+  select(Age, Gender, OHIP) %>% 
+  gtsummary::tbl_summary(by = Gender)
+```
+
+## OHIP
+
+```{r}
+df %>% 
+  ggplot(aes(x = Age)) + 
+  geom_histogram() +
+  scale_x_log10()
+```
+
+```{r}
+df %>% 
+  ggplot(aes(x = OHIP)) + 
+  geom_histogram()
+```
+
+## OHIP by gender
+
+```{r}
+df %>% 
+  ggplot(aes(x = OHIP, 
+             fill = Gender)) + 
+  geom_histogram() + 
+  facet_wrap(Gender ~ .)
+```
+
+```{r}
+df %>% 
+```
+
+## OHIP by age
+
+## Analysis each question
+
+```{r}
+df %>% 
+  
+```
