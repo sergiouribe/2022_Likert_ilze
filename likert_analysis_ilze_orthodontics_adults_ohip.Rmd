@@ -1,9 +1,19 @@
 ---
 title: "Likert analysis"
-output: html_notebook
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+    code_folding: hide
+  pdf_document:
+    toc: yes
 ---
 
-Data cleaning, data wrangling and Likert analysis
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
 
 # Packages
 
@@ -11,6 +21,10 @@ Data cleaning, data wrangling and Likert analysis
 pacman::p_load(janitor, 
                tidyverse, 
                gtsummary, 
+               patchwork, 
+               reporter, 
+               sjPlot, 
+               scales, 
                likert)
 ```
 
@@ -37,24 +51,26 @@ df %>%
   geom_jitter()
 ```
 
+Clean the age
+
 ```{r}
 df <- df %>% 
   mutate(Year_actual = format(as.Date(Datum, format="%d/%m/%Y"),"%Y")) %>% 
   relocate(Year_actual, .after = Datum) %>% 
-  # calculate the age
+  # Convert to int
   mutate(`Birth year` = as.integer(`Birth year`)) %>% 
    mutate(Year_actual = as.integer(Year_actual)) %>% 
+  # calculate the age
   mutate(Age = Year_actual - `Birth year`) %>% 
   relocate(Age, .after = `Birth year`) %>% 
-  select(-c(Datum, Year_actual, `Birth year`))
+  select(-c(Year_actual, `Birth year`, Datum))
+  
+
 ```
+
+## 
 
 # EDA
-
-```{r}
-head(df)
-
-```
 
 How many patients?
 
@@ -65,32 +81,32 @@ df %>%
    adorn_totals("row") 
 ```
 
-Age
-
 ```{r}
 summary(df$Age)
 ```
 
+## Ohip by age and gender
+
 ```{r}
+df %>% 
+  ggplot(aes(x = OHIP, 
+             fill = Gender)) + 
+  geom_histogram() + 
+  facet_grid(. ~ Gender) + 
+  labs(title = "Age distribution")
+```
+
+Table
+
+```{r}
+
 df %>% 
   select(Age, Gender, OHIP) %>% 
-  gtsummary::tbl_summary(by = Gender)
+  gtsummary::tbl_summary(by = Gender) %>% 
+  gtsummary::add_p()
 ```
 
-## OHIP
-
-```{r}
-df %>% 
-  ggplot(aes(x = Age)) + 
-  geom_histogram() +
-  scale_x_log10()
-```
-
-```{r}
-df %>% 
-  ggplot(aes(x = OHIP)) + 
-  geom_histogram()
-```
+# OHIP
 
 ## OHIP by gender
 
@@ -103,14 +119,332 @@ df %>%
 ```
 
 ```{r}
+df %>%
+  ggplot(aes(y = OHIP,
+             x = Gender, 
+             color = Gender)) +
+  geom_violin() +
+  geom_boxplot(width = .3) +
+  theme(legend.position = "none")  +
+  labs(title = "OHIP by Gender")
+  
+```
+
+## Regression analysis
+
+```{r}
 df %>% 
+  with(glm(OHIP ~ Age + Gender))  %>% 
+  gtsummary::tbl_regression()
+```
+
+```{r}
+df %>% 
+  with(glm(OHIP ~ Age + Gender))  %>% 
+  report::report()
+```
+
+```{r}
+df %>% 
+  with(glm(OHIP ~ Age + Gender)) %>% 
+  sjPlot::plot_model()
 ```
 
 ## OHIP by age
 
+```{r}
+df %>% 
+  ggplot(aes(x = OHIP, 
+             y = Age, 
+             color = Gender)) + 
+  geom_jitter() +
+  labs(title = "OHIP and Age by Gender")
+```
+
 ## Analysis each question
 
 ```{r}
-df %>% 
+df_long_values <- df %>% 
+  select(-c(`Difficulty pronouncing words`:`Totally unable to function`)) %>% 
+  pivot_longer(`Difficulty pronouncing words Weighted`:`Totally unable to function Weighted`, 
+               names_to = "OHIP_item", 
+               values_to = "OHIP_value_weighted") 
+```
+
+```{r}
+df_long_likert <- df %>% 
+  select(Gender, c(`Difficulty pronouncing words`:`Totally unable to function`)) %>%
+  pivot_longer(`Difficulty pronouncing words`:`Totally unable to function`, 
+               names_to = "likert_item", 
+               values_to = "likert_value") 
+```
+
+Data summary
+
+```{r}
+df_long_likert_summary <- df_long_likert %>% 
+  group_by(likert_item, likert_value) %>% 
+  count(name = "n_answers") %>% 
+  group_by(likert_item) %>% 
+  mutate(percent_answers = n_answers / sum(n_answers)) %>% 
+  ungroup() %>% 
+  mutate(percent_answers_label = percent(percent_answers, accuracy = 1))
+```
+
+```{r}
+head(df_long_likert_summary)
+```
+
+```{r}
+df_long_likert_summary <- df_long_likert_summary %>% 
+  mutate(likert_value = fct_relevel(likert_value, 
+                                  "Never", 
+                                  "Hardly ever", 
+                                  "Occasionally", 
+                                   "Fairly often", 
+                                  "Very often"))
+```
+
+```{r}
+ df_long_likert_summary %>%
+  ggplot(aes(x = likert_item, 
+             y = percent_answers,
+             fill = likert_value)) +
+  geom_col() +
+  geom_text(aes(label = percent_answers_label),
+            position = position_stack(vjust = 0.5),
+            color = "white",
+            fontface = "bold") +
+  coord_flip() +
+  scale_x_discrete() +
+  scale_fill_viridis_d() +
+  labs(title = "Title",
+       x = NULL,
+       fill = NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "top")
+```
+
+## Likert plot with sjPlot
+
+```{r}
+df_for_likert <- df %>% 
+  # select some columns
+  select(Age:`Totally unable to function`) %>% 
   
+  # create an ID to not to mess with the pivot_wider afterwards
+  mutate(id = row_number()) %>% 
+  relocate(id, .before = Age) %>% 
+
+  # reshape for easy wrangling
+  pivot_longer(cols = -c(id, Age, Gender)) %>% 
+  
+  # reorder the levels
+  mutate(value = fct_relevel(value, 
+                                  "Never", 
+                                  "Hardly ever", 
+                                  "Occasionally", 
+                                   "Fairly often", 
+                                  "Very often")) %>% 
+  # convert to a numeric variable
+  # mutate(value_num = case_when(
+  #  value == "Never" ~ "1", 
+  #  value == "Hardly ever" ~ "2", 
+  #  value == "Occasionally" ~ "3", 
+  #  value == "Fairly often" ~ "4", 
+  #  TRUE ~ "5"
+  # )) %>% 
+  # mutate(value_num = as.integer(value_num)) %>% 
+  
+  # select only these columns
+
+# collapse categories
+mutate(value = case_when(
+  value == "Fairly often" ~ "Very often", 
+  TRUE ~ as.character(as.character(value))
+)) %>% 
+  
+
+
+
+
+  # select(id, name, value_num) %>% 
+  select(id, name, value) %>% 
+  # reshape for the graph
+  
+  pivot_wider(names_from = name, 
+              values_from = value)
+```
+
+```{r}
+df_for_likert %>% 
+  select(-id) %>% 
+  dplyr::mutate_all(., ~ ordered(., levels = c("Very often", "Occasionally", "Hardly ever", "Never"))) %>%
+ #  janitor::tabyl(`Pain experience`)
+
+
+plot_likert(
+  # grid.range = c(1.2, 1.4),
+ # expand.grid = FALSE,
+  sort.frq = "pos.desc", 
+  values = "sum.outside"
+  #show.prc.sign = TRUE
+) 
+```
+
+```{r}
+ggsave("likert_all.pdf", width = 23, height = 15, units = "cm")
+```
+
+## Men and Women Likert
+
+### Men
+
+```{r}
+df_for_likert_man <- df %>% 
+  filter(Gender == "Man") %>% 
+  # select some columns
+  select(Age:`Totally unable to function`) %>% 
+  
+  # create an ID to not to mess with the pivot_wider afterwards
+  mutate(id = row_number()) %>% 
+  relocate(id, .before = Age) %>% 
+
+  # reshape for easy wrangling
+  pivot_longer(cols = -c(id, Age, Gender)) %>% 
+  
+  # reorder the levels
+  mutate(value = fct_relevel(value, 
+                                  "Never", 
+                                  "Hardly ever", 
+                                  "Occasionally", 
+                                   "Fairly often", 
+                                  "Very often")) %>% 
+  # convert to a numeric variable
+  # mutate(value_num = case_when(
+  #  value == "Never" ~ "1", 
+  #  value == "Hardly ever" ~ "2", 
+  #  value == "Occasionally" ~ "3", 
+  #  value == "Fairly often" ~ "4", 
+  #  TRUE ~ "5"
+  # )) %>% 
+  # mutate(value_num = as.integer(value_num)) %>% 
+  
+  # select only these columns
+
+# collapse categories
+mutate(value = case_when(
+  value == "Fairly often" ~ "Very often", 
+  TRUE ~ as.character(as.character(value))
+)) %>% 
+  
+
+
+
+
+  # select(id, name, value_num) %>% 
+  select(id, name, value) %>% 
+  # reshape for the graph
+  
+  pivot_wider(names_from = name, 
+              values_from = value)
+```
+
+```{r}
+df_for_likert_man %>% 
+  select(-id) %>% 
+  dplyr::mutate_all(., ~ ordered(., levels = c("Very often", "Occasionally", "Hardly ever", "Never"))) %>%
+ #  janitor::tabyl(`Pain experience`)
+
+
+plot_likert(
+  # grid.range = c(1.2, 1.4),
+ # expand.grid = FALSE,
+  sort.frq = "pos.desc", 
+  values = "sum.outside"
+  #show.prc.sign = TRUE
+) +
+  labs(title = "Men")
+
+
+```
+
+```{r}
+ggsave("likert_man.pdf", width = 23, height = 15, units = "cm")
+```
+
+### Women Likert
+
+```{r}
+df_for_likert_women <- df %>% 
+  filter(Gender == "Woman") %>% 
+  # select some columns
+  select(Age:`Totally unable to function`) %>% 
+  
+  # create an ID to not to mess with the pivot_wider afterwards
+  mutate(id = row_number()) %>% 
+  relocate(id, .before = Age) %>% 
+
+  # reshape for easy wrangling
+  pivot_longer(cols = -c(id, Age, Gender)) %>% 
+  
+  # reorder the levels
+  mutate(value = fct_relevel(value, 
+                                  "Never", 
+                                  "Hardly ever", 
+                                  "Occasionally", 
+                                   "Fairly often", 
+                                  "Very often")) %>% 
+  # convert to a numeric variable
+  # mutate(value_num = case_when(
+  #  value == "Never" ~ "1", 
+  #  value == "Hardly ever" ~ "2", 
+  #  value == "Occasionally" ~ "3", 
+  #  value == "Fairly often" ~ "4", 
+  #  TRUE ~ "5"
+  # )) %>% 
+  # mutate(value_num = as.integer(value_num)) %>% 
+  
+  # select only these columns
+
+# collapse categories
+mutate(value = case_when(
+  value == "Fairly often" ~ "Very often", 
+  TRUE ~ as.character(as.character(value))
+)) %>% 
+  
+
+
+
+
+  # select(id, name, value_num) %>% 
+  select(id, name, value) %>% 
+  # reshape for the graph
+  
+  pivot_wider(names_from = name, 
+              values_from = value)
+```
+
+```{r}
+df_for_likert_women %>% 
+  select(-id) %>% 
+  dplyr::mutate_all(., ~ ordered(., levels = c("Very often", "Occasionally", "Hardly ever", "Never"))) %>%
+ #  janitor::tabyl(`Pain experience`)
+
+
+plot_likert(
+  # grid.range = c(1.2, 1.4),
+ # expand.grid = FALSE,
+  sort.frq = "pos.desc", 
+  values = "sum.outside"
+  #show.prc.sign = TRUE
+) +
+  labs(title = "Women")
+```
+
+```{r}
+ggsave("likert_woman.pdf", width = 23, height = 15, units = "cm")
 ```
